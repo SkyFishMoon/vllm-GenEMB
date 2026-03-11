@@ -60,15 +60,17 @@ class PoolingParams(
     skip_reading_prefix_cache: bool = None
     extra_kwargs: dict[str, Any] | None = None
     output_kind: RequestOutputKind = RequestOutputKind.FINAL_ONLY
+    
+    token_index: int | None = None
 
     @property
     def all_parameters(self) -> list[str]:
-        return ["dimensions", "normalize", "use_activation"]
+        return ["dimensions", "normalize", "use_activation", "token_index"]
 
     @property
     def valid_parameters(self):
         return {
-            "embed": ["dimensions", "normalize"],
+            "embed": ["dimensions", "normalize", "token_index"],
             "classify": ["use_activation"],
             "score": ["use_activation"],
             "token_embed": ["dimensions", "normalize"],

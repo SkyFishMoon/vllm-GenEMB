@@ -1667,6 +1667,10 @@ class PoolingCompletionRequest(EmbeddingCompletionRequest):
         "If it is a classify or token_classify task, the default is True; "
         "for other tasks, this value should be None.",
     )
+    token_index: int | None = Field(
+    	default=None,
+    	description="Which token to use for embedding. Supports negative indices. Default: last token."
+    )
 
     def to_pooling_params(self):
         return PoolingParams(
@@ -1674,6 +1678,7 @@ class PoolingCompletionRequest(EmbeddingCompletionRequest):
             dimensions=self.dimensions,
             normalize=self.normalize,
             use_activation=get_use_activation(self),
+            token_index=self.token_index,
         )
 
 
@@ -1693,6 +1698,10 @@ class PoolingChatRequest(EmbeddingChatRequest):
         "If it is a classify or token_classify task, the default is True; "
         "for other tasks, this value should be None.",
     )
+    token_index: int | None = Field(
+    	default=None,
+    	description="Which token to use for embedding. Supports negative indices. Default: last token."
+    )
 
     def to_pooling_params(self):
         return PoolingParams(
@@ -1700,6 +1709,7 @@ class PoolingChatRequest(EmbeddingChatRequest):
             dimensions=self.dimensions,
             normalize=self.normalize,
             use_activation=get_use_activation(self),
+            token_index=self.token_index,
         )
 
 

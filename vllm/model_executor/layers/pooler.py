@@ -195,6 +195,46 @@ class LastPool(PoolingMethod):
     def get_supported_tasks(self) -> Set[PoolingTask]:
         return {"token_embed", "token_classify", "embed", "classify", "score"}
 
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        pooling_metadata: PoolingMetadata,
+    ) -> torch.Tensor:
+        # pydevd_pycharm.settrace('127.0.0.1', port=47509, stdout_to_server=True, stderr_to_server=True)
+        pooling_cursor = pooling_metadata.pooling_cursor
+        pooling_params = get_pooling_params(pooling_metadata)
+
+        # 每条请求的 token_index（可能为 None / 正数 / 负数）
+        token_indices = [p.token_index for p in pooling_params]
+
+        # 如果全是 None，保持原行为：最后一个 token
+        if all(ti is None for ti in token_indices):
+            return hidden_states[pooling_cursor.last_token_indices_gpu]
+
+        # 否则：对每条请求按 token_index 选取 token
+        # prompt_lens_cpu: [B]，first_token_indices_gpu: [B]（flattened hidden state 的起始位置）
+        prompt_lens = pooling_cursor.prompt_lens_cpu  # on CPU
+
+        # 把 token_index 做成 CPU tensor 再搬到 GPU（B 很小，开销可忽略）
+        n_sched_cpu = pooling_cursor.num_scheduled_tokens_cpu
+        ti_cpu = torch.tensor(
+            [(-1 if ti is None or -ti > n_sched_cpu[i] else int(ti)) for i, ti in enumerate(token_indices)],
+            dtype=prompt_lens.dtype,
+            device=prompt_lens.device,
+        )
+
+        if torch.any(ti_cpu >= 0):
+            bad = int(torch.nonzero(ti_cpu >= 0)[0].item())
+            raise ValueError(f"Only negative token_index supported. Got {token_indices[bad]}")
+
+        last_idx = pooling_cursor.last_token_indices_gpu  # GPU [B]
+        offset_cpu = (ti_cpu + 1)  # -1->0, -2->-1, ...
+        offset_gpu = offset_cpu.to(last_idx.device, non_blocking=True)
+
+        gather_idx = last_idx + offset_gpu
+
+        return hidden_states[gather_idx]
+
     def forward_all(
         self,
         hidden_states: torch.Tensor,
