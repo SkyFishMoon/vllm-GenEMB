@@ -50,6 +50,7 @@ class CachedRequestState:
     capture_token_id: int | None = None
     capture_token_hidden_normalize: bool = True
     captured_hidden: torch.Tensor | None = None
+    last_token_hidden: torch.Tensor | None = None
 
     # Used when both async_scheduling and spec_decode are enabled.
     prev_num_draft_len: int = 0

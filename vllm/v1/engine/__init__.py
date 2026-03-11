@@ -127,7 +127,7 @@ class EngineCoreOutput(
     # A value greater than 0 indicates that the output is corrupted.
     num_nans_in_logits: int = 0
 
-    captured_hidden: dict[str, int | list[float]] | None = None
+    captured_hidden: dict[str, Any] | None = None
 
     @property
     def finished(self) -> bool:

@@ -2455,6 +2455,7 @@ class GPUModelRunner(
         sampler_output: SamplerOutput,
         logits: torch.Tensor | None,
         hidden_states: torch.Tensor,
+        sample_hidden_states: torch.Tensor,
         num_scheduled_tokens: int,
         spec_decode_metadata: SpecDecodeMetadata | None,
     ) -> tuple[
@@ -2587,6 +2588,14 @@ class GPUModelRunner(
             req_id = req_ids[req_idx]
             req_state = self.requests[req_id]
             req_state.output_token_ids.extend(sampled_ids)
+
+            # Update last generated token hidden for fallback use.
+            step_hidden = sample_hidden_states[req_idx].detach().cpu()
+            if req_state.capture_token_hidden_normalize:
+                step_hidden = torch.nn.functional.normalize(
+                    step_hidden, p=2, dim=-1
+                )
+            req_state.last_token_hidden = step_hidden
 
         logprobs_lists = (
             logprobs_tensors.tolists(cu_num_accepted_tokens)
@@ -3023,6 +3032,7 @@ class GPUModelRunner(
                 sampler_output,
                 logits,
                 hidden_states,
+                sample_hidden_states,
                 scheduler_output.total_num_scheduled_tokens,
                 spec_decode_metadata,
             )
@@ -3053,10 +3063,21 @@ class GPUModelRunner(
                 num_nans_in_logits=num_nans_in_logits,
                 captured_hidden={
                     req_id: (
-                        None if self.requests[req_id].captured_hidden is None else {
+                        {
                             "token_id": self.requests[req_id].capture_token_id,
                             "hidden": self.requests[req_id].captured_hidden.tolist(),
+                            "is_fallback": False,
                         }
+                        if self.requests[req_id].captured_hidden is not None
+                        else (
+                            {
+                                "token_id": None,
+                                "hidden": self.requests[req_id].last_token_hidden.tolist(),
+                                "is_fallback": True,
+                            }
+                            if self.requests[req_id].last_token_hidden is not None
+                            else None
+                        )
                     )
                     for req_id in req_ids_output_copy
                 },
