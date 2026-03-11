@@ -46,6 +46,11 @@ class CachedRequestState:
     lora_request: LoRARequest | None = None
     prompt_embeds: torch.Tensor | None = None
 
+    # New fields for generated special-token hidden capture
+    capture_token_id: int | None = None
+    capture_token_hidden_normalize: bool = True
+    captured_hidden: torch.Tensor | None = None
+
     # Used when both async_scheduling and spec_decode are enabled.
     prev_num_draft_len: int = 0
 
@@ -168,6 +173,27 @@ class InputBatch:
         )
         self.top_k_cpu = self.top_k_cpu_tensor.numpy()
         self.top_k_reqs: set[str] = set()
+
+        # Capture-generated-token-hidden related
+        self.capture_token_ids = torch.empty(
+            (max_num_reqs,), dtype=torch.int64, device=device
+        )
+        self.capture_token_ids_cpu_tensor = torch.empty(
+            (max_num_reqs,), dtype=torch.int64, device="cpu", pin_memory=pin_memory
+        )
+        self.capture_token_ids_cpu = self.capture_token_ids_cpu_tensor.numpy()
+
+        self.capture_token_hidden_normalize = torch.empty(
+            (max_num_reqs,), dtype=torch.bool, device=device
+        )
+        self.capture_token_hidden_normalize_cpu_tensor = torch.empty(
+            (max_num_reqs,), dtype=torch.bool, device="cpu", pin_memory=pin_memory
+        )
+        self.capture_token_hidden_normalize_cpu = (
+            self.capture_token_hidden_normalize_cpu_tensor.numpy()
+        )
+        self.capture_token_ids_cpu.fill(-1)
+        self.capture_token_hidden_normalize_cpu.fill(False)
 
         # IDs of requests which do not support spec decoding
         self.spec_decode_unsupported_reqs: set[str] = set()
@@ -362,6 +388,14 @@ class InputBatch:
             else:
                 top_k = self.vocab_size
             self.top_k_cpu[req_index] = top_k
+
+            self.capture_token_ids_cpu[req_index] = (
+                -1 if request.capture_token_id is None else int(request.capture_token_id)
+            )
+            self.capture_token_hidden_normalize_cpu[req_index] = bool(
+                request.capture_token_hidden_normalize
+            )
+
             self.frequency_penalties_cpu[req_index] = sampling_params.frequency_penalty
             if sampling_params.frequency_penalty != 0.0:
                 self.frequency_penalties_reqs.add(req_id)
@@ -491,6 +525,9 @@ class InputBatch:
         self.num_prompt_logprobs.pop(req_id, None)
         self.in_progress_prompt_logprobs_cpu.pop(req_id, None)
 
+        self.capture_token_ids_cpu[req_index] = -1
+        self.capture_token_hidden_normalize_cpu[req_index] = False
+
         self.has_allowed_token_ids.discard(req_id)
         if self.allowed_token_ids_mask_cpu_tensor is not None:
             # False means we don't fill with -inf.
@@ -591,6 +628,14 @@ class InputBatch:
         self.num_accepted_tokens_cpu[i1], self.num_accepted_tokens_cpu[i2] = (
             self.num_accepted_tokens_cpu[i2],
             self.num_accepted_tokens_cpu[i1],
+        )
+        self.capture_token_ids_cpu[i1], self.capture_token_ids_cpu[i2] = (
+            self.capture_token_ids_cpu[i2],
+            self.capture_token_ids_cpu[i1],
+        )
+        self.capture_token_hidden_normalize_cpu[i1], self.capture_token_hidden_normalize_cpu[i2] = (
+            self.capture_token_hidden_normalize_cpu[i2],
+            self.capture_token_hidden_normalize_cpu[i1],
         )
 
         swap_dict_values(self.generators, i1, i2)
@@ -709,6 +754,12 @@ class InputBatch:
             self.num_accepted_tokens_cpu[empty_index] = self.num_accepted_tokens_cpu[
                 last_req_index
             ]
+            self.capture_token_ids_cpu[empty_index] = self.capture_token_ids_cpu[
+                last_req_index
+            ]
+            self.capture_token_hidden_normalize_cpu[empty_index] = (
+                self.capture_token_hidden_normalize_cpu[last_req_index]
+            )
             generator = self.generators.pop(last_req_index, None)
             if generator is not None:
                 self.generators[empty_index] = generator
@@ -722,6 +773,9 @@ class InputBatch:
             bad_words_token_ids = self.bad_words_token_ids.pop(last_req_index, None)
             if bad_words_token_ids is not None:
                 self.bad_words_token_ids[empty_index] = bad_words_token_ids
+
+            self.capture_token_ids_cpu[last_req_index] = -1
+            self.capture_token_hidden_normalize_cpu[last_req_index] = False
 
             # Decrement last_req_index since it is now empty.
             last_req_index -= 1
@@ -813,6 +867,17 @@ class InputBatch:
             )
             allowed_token_ids_mask = self.allowed_token_ids_mask[:num_reqs]
 
+        copy_slice(
+            self.capture_token_ids_cpu_tensor,
+            self.capture_token_ids,
+            num_reqs,
+        )
+        copy_slice(
+            self.capture_token_hidden_normalize_cpu_tensor,
+            self.capture_token_hidden_normalize,
+            num_reqs,
+        )
+
         return SamplingMetadata(
             temperature=temperature,
             all_greedy=self.all_greedy,
@@ -831,6 +896,8 @@ class InputBatch:
             allowed_token_ids_mask=allowed_token_ids_mask,
             bad_words_token_ids=self.bad_words_token_ids,
             logitsprocs=self.logitsprocs,
+            capture_token_ids=self.capture_token_ids[:num_reqs],
+            capture_token_hidden_normalize=self.capture_token_hidden_normalize[:num_reqs]
         )
 
     def get_pooling_params(self) -> list[PoolingParams]:

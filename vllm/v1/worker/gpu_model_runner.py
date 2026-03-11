@@ -746,6 +746,15 @@ class GPUModelRunner(
                 num_computed_tokens=new_req_data.num_computed_tokens,
                 output_token_ids=[],
                 lora_request=new_req_data.lora_request,
+                capture_token_id=(
+                    None if sampling_params is None or sampling_params.extra_args is None
+                    else sampling_params.extra_args.get("capture_token_id")
+                ),
+                capture_token_hidden_normalize=(
+                    True if sampling_params is None or sampling_params.extra_args is None
+                    else bool(sampling_params.extra_args.get("capture_token_hidden_normalize", 1))
+                ),
+                captured_hidden=None,
             )
             self.requests[req_id] = req_state
 
@@ -2416,6 +2425,7 @@ class GPUModelRunner(
     def _sample(
         self,
         logits: torch.Tensor | None,
+        sample_hidden_states: torch.Tensor | None,
         spec_decode_metadata: SpecDecodeMetadata | None,
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
@@ -2427,6 +2437,7 @@ class GPUModelRunner(
             return self.sampler(
                 logits=logits,
                 sampling_metadata=sampling_metadata,
+                last_hidden=sample_hidden_states,
             )
 
         sampler_output = self.rejection_sampler(
@@ -2469,8 +2480,28 @@ class GPUModelRunner(
 
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
+        # pydevd_pycharm.settrace('127.0.0.1', port=47529, stdout_to_server=True, stderr_to_server=True)
         req_ids_output_copy = self.input_batch.req_ids.copy()
         req_id_to_index_output_copy = self.input_batch.req_id_to_index.copy()
+
+        # Write captured hidden states back to request states.
+        if (
+                sampler_output.captured_hidden is not None
+                and sampler_output.captured_hidden_mask is not None
+        ):
+            hit_indices = torch.nonzero(
+                sampler_output.captured_hidden_mask, as_tuple=False
+            ).view(-1).tolist()
+
+            for req_idx in hit_indices:
+                req_id = req_ids_output_copy[req_idx]
+                req_state = self.requests[req_id]
+
+                # 只保留第一次命中的 hidden（更适合 stop token 场景）
+                if getattr(req_state, "captured_hidden", None) is None:
+                    req_state.captured_hidden = (
+                        sampler_output.captured_hidden[req_idx].detach().cpu()
+                    )
 
         num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
         sampled_token_ids = sampler_output.sampled_token_ids
@@ -2917,7 +2948,7 @@ class GPUModelRunner(
             )
 
         with record_function_or_nullcontext("gpu_model_runner: sample"):
-            sampler_output = self._sample(logits, spec_decode_metadata)
+            sampler_output = self._sample(logits, sample_hidden_states, spec_decode_metadata)
 
         self.input_batch.prev_sampled_token_ids = None
 
@@ -3020,6 +3051,15 @@ class GPUModelRunner(
                 if self.supports_mm_inputs
                 else None,
                 num_nans_in_logits=num_nans_in_logits,
+                captured_hidden={
+                    req_id: (
+                        None if self.requests[req_id].captured_hidden is None else {
+                            "token_id": self.requests[req_id].capture_token_id,
+                            "hidden": self.requests[req_id].captured_hidden.tolist(),
+                        }
+                    )
+                    for req_id in req_ids_output_copy
+                },
             )
 
         if not self.use_async_scheduling:
@@ -3933,10 +3973,12 @@ class GPUModelRunner(
             allowed_token_ids_mask=None,
             bad_words_token_ids={},
             logitsprocs=LogitsProcessors(),
+            capture_token_ids=None,
+            capture_token_hidden_normalize=None,
         )
         try:
             sampler_output = self.sampler(
-                logits=logits, sampling_metadata=dummy_metadata
+                logits=logits, sampling_metadata=dummy_metadata, last_hidden=hidden_states,
             )
         except RuntimeError as e:
             if "out of memory" in str(e):

@@ -204,6 +204,7 @@ class RequestState:
         finish_reason: FinishReason | None,
         stop_reason: int | str | None,
         kv_transfer_params: dict[str, Any] | None = None,
+        captured_hidden: dict[str, int | list[float]] | None = None,
     ) -> RequestOutput | PoolingRequestOutput | None:
         finished = finish_reason is not None
         final_only = self.output_kind == RequestOutputKind.FINAL_ONLY
@@ -238,7 +239,8 @@ class RequestState:
         request_id = self.request_id
         if pooling_output is not None:
             return self._new_request_output(
-                request_id, [self._new_pooling_output(pooling_output)], finished
+                request_id, [self._new_pooling_output(pooling_output)], finished,
+                captured_hidden=captured_hidden
             )
 
         output = self._new_completion_output(new_token_ids, finish_reason, stop_reason)
@@ -253,7 +255,7 @@ class RequestState:
                 return None
 
         return self._new_request_output(
-            request_id, outputs, finished, kv_transfer_params
+            request_id, outputs, finished, kv_transfer_params, captured_hidden=captured_hidden,
         )
 
     def _new_request_output(
@@ -262,6 +264,7 @@ class RequestState:
         outputs: list[CompletionOutput] | list[PoolingOutput],
         finished: bool,
         kv_transfer_params: dict[str, Any] | None = None,
+        captured_hidden: dict[str, int | list[float]] | None = None,
     ) -> RequestOutput | PoolingRequestOutput:
         first_output = outputs[0]
         if isinstance(first_output, PoolingOutput):
@@ -297,6 +300,7 @@ class RequestState:
             kv_transfer_params=kv_transfer_params,
             num_cached_tokens=self.num_cached_tokens,
             metrics=self.stats,
+            captured_hidden=captured_hidden
         )
 
     def _new_completion_output(
@@ -496,6 +500,7 @@ class OutputProcessor:
                 finish_reason,
                 stop_reason,
                 kv_transfer_params,
+                captured_hidden=engine_core_output.captured_hidden
             ):
                 if req_state.queue is not None:
                     # AsyncLLM: put into queue for handling by generate().

@@ -197,7 +197,7 @@ class Scheduler(SchedulerInterface):
         # num_tokens_with_spec. This is general enough to cover
         # chunked prefills, prefix caching, speculative decoding,
         # and the "jump decoding" optimization in the future.
-
+        # pydevd_pycharm.settrace('127.0.0.1', port=47509, stdout_to_server=True, stderr_to_server=True)
         scheduled_new_reqs: list[Request] = []
         scheduled_resumed_reqs: list[Request] = []
         scheduled_running_reqs: list[Request] = []
@@ -973,6 +973,7 @@ class Scheduler(SchedulerInterface):
         pooler_outputs = model_runner_output.pooler_output
         num_nans_in_logits = model_runner_output.num_nans_in_logits
         kv_connector_output = model_runner_output.kv_connector_output
+        captured_hidden = model_runner_output.captured_hidden
 
         outputs: dict[int, list[EngineCoreOutput]] = defaultdict(list)
         spec_decoding_stats: SpecDecodingStats | None = None
@@ -1014,6 +1015,10 @@ class Scheduler(SchedulerInterface):
             generated_token_ids: list[int] = (
                 sampled_token_ids[req_index].tolist() if sampled_token_ids else []
             )
+
+            req_captured_hidden = None
+            if captured_hidden is not None:
+                req_captured_hidden = captured_hidden.get(req_id)
 
             scheduled_spec_token_ids = (
                 scheduler_output.scheduled_spec_decode_tokens.get(req_id)
@@ -1101,6 +1106,7 @@ class Scheduler(SchedulerInterface):
                         trace_headers=request.trace_headers,
                         num_cached_tokens=request.num_cached_tokens,
                         num_nans_in_logits=request.num_nans_in_logits,
+                        captured_hidden=req_captured_hidden,
                     )
                 )
             else:

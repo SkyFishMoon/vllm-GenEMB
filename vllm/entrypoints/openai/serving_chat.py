@@ -1304,6 +1304,9 @@ class OpenAIServingChat(OpenAIServing):
             return self.create_error_response(str(e))
 
         assert final_res is not None
+        # pydevd_pycharm.settrace('127.0.0.1', port=47529, stdout_to_server=True, stderr_to_server=True)
+
+        capture_payload = getattr(final_res, "captured_hidden", None)
 
         choices: list[ChatCompletionResponseChoice] = []
         if self.tool_call_id_type == "kimi_k2":
@@ -1312,6 +1315,7 @@ class OpenAIServingChat(OpenAIServing):
             history_tool_call_cnt = 0
 
         role = self.get_chat_request_role(request)
+        # pydevd_pycharm.settrace('127.0.0.1', port=47529, stdout_to_server=True, stderr_to_server=True)
         for output in final_res.outputs:
             token_ids = output.token_ids
             out_logprobs = output.logprobs
@@ -1371,6 +1375,7 @@ class OpenAIServingChat(OpenAIServing):
                     token_ids=(
                         as_list(output.token_ids) if request.return_token_ids else None
                     ),
+                    capture=capture_payload,
                 )
                 choices.append(choice_data)
                 continue
@@ -1524,6 +1529,7 @@ class OpenAIServingChat(OpenAIServing):
                 token_ids=(
                     as_list(output.token_ids) if request.return_token_ids else None
                 ),
+                capture=capture_payload,
             )
 
             choices.append(choice_data)

@@ -68,6 +68,7 @@ class Sampler(nn.Module):
         self,
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
+        last_hidden: torch.Tensor | None = None,
         predict_bonus_token: bool = False,
         logprobs_mode_override: LogprobsMode | None = None,
     ) -> SamplerOutput:
@@ -99,6 +100,30 @@ class Sampler(nn.Module):
         # return int32 (while PyTorch argmax and topk return int64).
         sampled = sampled.long()
 
+        captured_hidden = None
+        captured_hidden_mask = None
+        # pydevd_pycharm.settrace('127.0.0.1', port=47529, stdout_to_server=True, stderr_to_server=True)
+
+        if (
+                last_hidden is not None
+                and sampling_metadata.capture_token_ids is not None
+        ):
+            cap_ids = sampling_metadata.capture_token_ids.to(sampled.device)
+            hit_mask = (cap_ids >= 0) & (sampled == cap_ids)
+
+            if torch.any(hit_mask):
+                captured_hidden = last_hidden.clone()
+
+                if sampling_metadata.capture_token_hidden_normalize is not None:
+                    norm_mask = sampling_metadata.capture_token_hidden_normalize.to(sampled.device)
+                    norm_rows = hit_mask & norm_mask
+                    if torch.any(norm_rows):
+                        captured_hidden[norm_rows] = torch.nn.functional.normalize(
+                            captured_hidden[norm_rows], p=2, dim=-1
+                        )
+
+                captured_hidden_mask = hit_mask
+
         if num_logprobs is None:
             logprobs_tensors = None
         elif num_logprobs == -1:
@@ -122,6 +147,8 @@ class Sampler(nn.Module):
             # token per request.
             sampled_token_ids=sampled.unsqueeze(-1),
             logprobs_tensors=logprobs_tensors,
+            captured_hidden=captured_hidden,
+            captured_hidden_mask=captured_hidden_mask,
         )
         return sampler_output
 

@@ -42,3 +42,7 @@ class SamplingMetadata:
 
     # Speculative token ids
     spec_token_ids: list[list[int]] | None = None
+
+    # New fields
+    capture_token_ids: torch.Tensor | None = None  # shape [batch]
+    capture_token_hidden_normalize: torch.Tensor | None = None  # bool/int, shape [batch]

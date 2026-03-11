@@ -831,7 +831,7 @@ class EngineCoreProc(EngineCore):
                 set_process_title("EngineCore")
                 decorate_logs()
                 engine_core = EngineCoreProc(*args, **kwargs)
-
+            # pydevd_pycharm.settrace('127.0.0.1', port=47509, stdout_to_server=True, stderr_to_server=True)
             engine_core.run_busy_loop()
 
         except SystemExit:

@@ -61,6 +61,9 @@ class Request:
         self.status = RequestStatus.WAITING
         self.events: list[EngineCoreEvent] = []
         self.stop_reason: int | str | None = None
+        self.capture_token_id: int | None = None
+        self.capture_token_hidden_normalize: bool = True
+        self.captured_hidden: torch.Tensor | None = None
 
         # P/D: Connector-specific KV transfer parameters.
         self.kv_transfer_params: dict[str, Any] | None = None
@@ -78,6 +81,12 @@ class Request:
             if sampling_params.extra_args is not None:
                 self.kv_transfer_params = sampling_params.extra_args.get(
                     "kv_transfer_params"
+                )
+                cap_id = sampling_params.extra_args.get("capture_token_id")
+                self.capture_token_id = int(cap_id) if cap_id is not None else None
+
+                self.capture_token_hidden_normalize = bool(
+                    sampling_params.extra_args.get("capture_token_hidden_normalize", 1)
                 )
         else:
             raise ValueError("sampling_params and pooling_params can't both be unset")
