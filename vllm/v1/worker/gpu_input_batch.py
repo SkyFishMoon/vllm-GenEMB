@@ -25,6 +25,7 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.spec_decode.utils import is_spec_decode_unsupported
 from vllm.v1.utils import copy_slice
 from vllm.v1.worker.block_table import MultiGroupBlockTable
+import pydevd_pycharm
 
 
 @dataclass
@@ -51,6 +52,7 @@ class CachedRequestState:
     capture_token_hidden_normalize: bool = True
     captured_hidden: torch.Tensor | None = None
     last_token_hidden: torch.Tensor | None = None
+    pending_capture_after_special: bool = False
 
     # Used when both async_scheduling and spec_decode are enabled.
     prev_num_draft_len: int = 0
